@@ -1,0 +1,29 @@
+# ignore .git
+.git
+.gitignore
+
+# ignore .vscode
+.vscode
+
+**/__pycache__/
+**/*.png
+**/*report.txt
+**/entrenamiento/
+**/cliente/
+**/test/
+**/*.ipynb
+**/data_analisis
+**/*.csv
+**/preprocess_dataset.py
+**/train_utils/
+**/train_*
+**/reports/
+**/notebooks/
+**/data/
+**/visualization/
+*.sh
+conda_dev_env.yml
+README.md
+
+**/models/
+Dockerfile
