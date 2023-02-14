@@ -4,7 +4,7 @@ import random
 import numpy as np
 import pandas as pd
 
-from utils import calculate_date_diff
+from utils import calculate_times
 
 
 def find_outliers_IQR(val):
@@ -28,8 +28,7 @@ def find_alerts(dataMongo):
     df['Fecha Inicio / Hora'] = df['Fecha Inicio / Hora'] - datetime.timedelta(hours=5)
     df['Fecha Fin / Hora'] = df['Fecha Fin / Hora'] - datetime.timedelta(hours=5)
     # Días laborados por registro
-    df['Dias registro'] = df.apply(lambda x: calculate_date_diff(x['Fecha Inicio / Hora'], x['Fecha Fin / Hora']), axis=1)
-    df['Dias registro'] = round(df['Dias registro'], 6)
+    df = calculate_times(df)
 
     # variables
     total_rad = df['Radicado'].unique() # Total Radicados
@@ -37,12 +36,12 @@ def find_alerts(dataMongo):
     comb_estado = df['Combinacion estado'].unique() # Combinación de estados
 
     temp_Est = [df.groupby(by=["Radicado","Estado"])["Estado"].count().reset_index(0).rename(columns={'Estado':'Procesos estado'}), # procesos por estados
-            df.groupby(by=['Radicado', 'Estado'])['Dias registro'].sum().reset_index(0).rename(columns={'Dias registro':'Dias estado'})] # dias por estado
+            df.groupby(by=['Radicado', 'Estado'])['tiempo_estado'].sum().reset_index(0).rename(columns={'tiempo_estado':'Dias estado'})] # dias por estado
 
     temp_Comb = df.groupby(by=["Radicado","Combinacion estado"])["Combinacion estado"].count().reset_index(0).rename(columns={'Combinacion estado':'Procesos combinacion estado'}) # procesos por combinación
 
     temp_Rad = [df.groupby(by=["Radicado"])["Radicado"].count().reset_index(name='Procesos radicado'), # procesos por radicado
-            df.groupby(by=['Radicado'])['Dias registro'].sum().reset_index(0).rename(columns={'Dias registro':'Dias radicado'})] # dias por radicado
+            df.groupby(by=['Radicado'])['tiempo_estado'].sum().reset_index(0).rename(columns={'tiempo_estado':'Dias radicado'})] # dias por radicado
 
     # MAIN
     results = []

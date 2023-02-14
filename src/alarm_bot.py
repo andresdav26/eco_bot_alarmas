@@ -1,9 +1,18 @@
 import os
 from datetime import datetime
-
+import logging
+import sys
 from pymongo import MongoClient
 from mongodb import fetch_data
 from alarms_process import find_alerts
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+cons_handler = logging.StreamHandler(sys.stdout)
+cons_handler.setLevel(logging.INFO)
+cons_handler.setFormatter(logging.Formatter('%(name)s [%(asctime)s] %(levelname)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
+logger.addHandler(cons_handler)
+logger.propagate = False
 
 if 'MONGO_EBKIA_DES' in os.environ:
     MONGODB_CONN_IA = os.environ['MONGO_EBKIA_DES']
@@ -22,7 +31,7 @@ def auto_alarms():
     alarms_collection = db['Autoalarmas']
     # get active alarm configurations that are not being updated
     configs = [conf for conf in config_collection.find({'Activa': True, 'Actualizando': False})]
-    now = datetime.now()
+    now = datetime.utcnow()
 
     for conf in configs:
         conf['SecondsSinceUpdate'] = (now - conf['UltimaActualizacion']).total_seconds()
@@ -43,7 +52,7 @@ def auto_alarms():
             update={'$set':{'Actualizando': True}}
         )
 
-        print(f'Actualizando {configs[0]["ColeccionLogs"]}')
+        logger.info(f'Actualizando {configs[0]["ColeccionLogs"]} {configs[0]["Proyecto"]}...'.replace('None', ''))
         # ========= alarmas process ========
         logs_data = fetch_data(
             collection=config_to_update['ColeccionLogs'],
@@ -51,17 +60,18 @@ def auto_alarms():
             conn=MONGODB_CONN_LOGS
             )
         if bool(logs_data):
-            print(f'Procesando {len(logs_data)} registros de logs.')
+            logger.info(f'Procesando {len(logs_data)} registros de logs.')
             alarms = find_alerts(logs_data)
 
-            print(f'{len(alarms)} alarmas obtenidas.')
+            logger.info(f'{len(alarms)} alarmas generadas.')
+            update_end = datetime.utcnow()
 
             for alarm in alarms:
                 alarm['ColeccionLog'] = config_to_update['ColeccionLogs']
                 alarm['Proyecto'] = config_to_update['Proyecto']
                 alarm['Proceso'] = config_to_update['Proceso']
                 alarm['Periodo'] = f'{now.year}{now.month:02d}'
-                alarm['UltimaActualizacion'] = now
+                alarm['UltimaActualizacion'] = update_end
 
                 alarms_collection.update_one(
                     filter={'$and': [
@@ -77,15 +87,14 @@ def auto_alarms():
                 )
 
         else:
-            print('!Consulta a logs no retornó datos!')
+            logger.warning(f'No se obtubieron datos de logs.')
         # =========================
-
         config_collection.update_one(
             filter={'_id': config_to_update['_id']},
-            update={'$set': {'Actualizando': False, 'UltimaActualizacion': datetime.now()}}
+            update={'$set': {'Actualizando': False, 'UltimaActualizacion': update_end}}
         )
     else:
-        print('Ninguna alarma por actualizar.')
+        pass
 
     client.close()
 

@@ -43,4 +43,4 @@ WORKDIR $WORK_DIR
 COPY --chown=1000:1000 . .
 
 # launch bot
-CMD ["python", "src/bot.py"]
+CMD ["python", "src/scheduler.py"]
