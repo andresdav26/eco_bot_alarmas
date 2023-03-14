@@ -1,6 +1,6 @@
-import datetime
+from datetime import datetime, timedelta
 import random
-
+import ast
 import numpy as np
 import pandas as pd
 
@@ -8,174 +8,268 @@ from utils import calculate_times
 
 
 def find_outliers_IQR(val):
-    q75, q25  = np.percentile(val.values, [75, 25])
+    q75, q25  = np.percentile(val, [75, 25])
     IQR = q75 - q25
     th = q75 + 1.5*IQR
     outliers = (val > th).sum()
-    if (val > th).sum() > 0:
-        MAX = np.max(val.values[val.values>th])
-    else:
-        MAX = None
-    return outliers, th, MAX
+    
+    return outliers, th
 
 
-def find_alerts(dataMongo):
+def find_alerts(dataMongo, hist_data, colog):
     # Definir dataframe 
     df = pd.DataFrame(dataMongo)
     df['Radicado'] = df['Radicado'].astype(str)
     df['Combinacion estado'] = df['Estado']+'-'+df['Estado Destino'] 
 
-    df['Fecha Inicio / Hora'] = df['Fecha Inicio / Hora'] - datetime.timedelta(hours=5)
-    df['Fecha Fin / Hora'] = df['Fecha Fin / Hora'] - datetime.timedelta(hours=5)
+    df['Fecha Inicio / Hora'] = df['Fecha Inicio / Hora'] - timedelta(hours=5)
+    df['Fecha Fin / Hora'] = df['Fecha Fin / Hora'] - timedelta(hours=5)
     
     # Días laborados por registro
-    df = calculate_times(df)
+    df['tiempo_estado'] = calculate_times(df)
 
     # variables 
-    total_rad = df['Radicado'].unique() # Total Radicados 
+    total_rad_periodo = len(df['Radicado'].unique()) # Total Radicados en el periodo
     estados = set(df['Estado'].unique().tolist() + df['Estado Destino'].unique().tolist()) # Estados
     comb_estado = df['Combinacion estado'].unique() # Combinación de estados
 
     temp_Est = [df.groupby(by=["Radicado","Estado"])["Estado"].count().reset_index(0).rename(columns={'Estado':'Procesos estado'}), # procesos por estados 
-            df.groupby(by=['Radicado', 'Estado'])['tiempo_estado'].sum().reset_index(0).rename(columns={'tiempo_estado':'Dias estado'})] # dias por estado
+                df.groupby(by=['Radicado', 'Estado'])['tiempo_estado'].sum().reset_index(0).rename(columns={'tiempo_estado':'Dias estado'})] # días por estado
 
     temp_Comb = df.groupby(by=["Radicado","Combinacion estado"])["Combinacion estado"].count().reset_index(0).rename(columns={'Combinacion estado':'Procesos combinacion estado'}) # procesos por combinación 
 
-    temp_Rad = [temp_Est[0].groupby(by=["Radicado"]).sum().reset_index(0).rename(columns={'Procesos estado':'Procesos radicado'}), # procesos por radicado
-                temp_Est[0].groupby(by=["Radicado"]).count().reset_index(0).rename(columns={'Procesos estado':'Cantidad estados x radicado'}),  # cantidad estados por radicado
-                df.groupby(by=['Radicado'])['tiempo_estado'].sum().reset_index(0).rename(columns={'tiempo_estado':'Dias radicado'})] # dias por radicado 
+    temp_Rad = [temp_Est[0].groupby(by=["Radicado"]).sum().reset_index(0).rename(columns={'Procesos estado':'Veces radicado'}), # procesos por radicado (sumatoria de los procesos que contiene cada estado)
+                temp_Est[0].groupby(by=["Radicado"]).count().reset_index(0).rename(columns={'Procesos estado':'Estados radicado'}),  # cantidad estados por radicado
+                df.groupby(by=['Radicado'])['tiempo_estado'].sum().reset_index(0).rename(columns={'tiempo_estado':'Dias radicado'})] # días por radicado
+
+    # Serivicios 
+    df_serv1 = df[['Estado', 'Servicio']].drop_duplicates().rename(columns={'Estado': 'estado'})
+    df_serv2 = df[['Estado Destino', 'Servicio']].drop_duplicates().rename(columns={'Estado Destino': 'estado'})
+    df_serv = pd.concat([df_serv1, df_serv2], ignore_index=True).drop_duplicates(subset='estado')
+    service_dict = {row['estado']: row['Servicio'] for _, row in df_serv.iterrows()}
 
     # MAIN 
     results = []
-    
+    historial = []
+    Nmuestras = int(5E5)
+
+    # filtros de consulta
+    proj = df['Proyecto'].values[0]
+    proc = df['Proceso'].values[0]
+
     # ANÁLISIS POR ESTADO 
     variables = ['Procesos estado', 'Dias estado']
-    type_alert = ['Reprocesos por estado','Dias laborados por estado']
+    # type_alert = ['Reprocesos por estado','Dias laborados por estado']
     rads_in = df.groupby(by=["Estado Destino"])["Radicado"].count()
     rads_out = df.groupby(by=["Estado"])["Radicado"].count()
     for st in estados:
-        alerts = []
-        result = {}
-        dif = 0
-        result['Tipo_de_analisis'] = 'Estado'
-        result['Nombre'] = st
-        for i, v in enumerate(variables):
-            if st in temp_Est[i].index:
-                val = temp_Est[i].loc[[st]][v] # procesos del estado "st" o días del estado "st"
-                outliers, th, MAX = find_outliers_IQR(val) # cantidad de radicados atípicos, threshold, valor máximo 
+        var = []
+        hist = {}
+        if st in df["Estado"].values:
+            hist['Nombre'] = st
+            
+            # Diferencia radicados in/out en st
+            if (st in rads_in.index) and (st in rads_out.index):
+                Rin = rads_in.loc[[st]].item()
+                Rout = rads_out.loc[[st]].item()
+                dif = Rin - Rout
+            else:
+                dif = 0
+            
+            for i, v in enumerate(variables):
+                result = {}
+
+                # Radicados donde aparece el estado
+                radicados = temp_Est[i].loc[[st]]['Radicado']
+
+                # Procesos del estado "st" o días del estado "st"
+                val = temp_Est[i].loc[[st]][v].astype(float) 
+                # redondeo
+                if v == 'Dias estado':
+                    val = np.round(val.values,4)
+                else:
+                    val = val.values 
                 
-                if outliers > 0:
-                    # diferencia in/out radicados
-                    if (st in rads_in.index) and (st in rads_out.index):
-                        Rin = rads_in.loc[[st]].item()
-                        Rout = rads_out.loc[[st]].item()
-                        dif = Rin - Rout
-                        
-                    # porcentaje
-                    radicados = temp_Est[i].loc[[st]]['Radicado'].unique() # total radicados donde aparece el estado
-                    porcentaje = outliers/len(radicados)*100
-
-                    # porcentaje de radicados del proceso sobre los radicados totales 
-                    result['rads/total_rad'] = round(len(radicados)/len(total_rad)*100, 2)
-
-                    # radicados donde hay casos atípicos 
-                    ejemplo_rad_max = temp_Est[i].loc[[st]]['Radicado'][val==MAX].unique() # radicado donde se encuentra el máximo valor
+                # Máximo y peor radicado en el periodo
+                idx_max = np.argmax(val)
+                peorRadicado = radicados[idx_max]
+                valMax = val[idx_max]
+                
+                # Historial 
+                df_hist = pd.DataFrame(hist_data) 
+                if bool(hist_data) and (colog in df_hist['ColeccionLog'].values) and (proj in df_hist['Proyecto'].values) and (proc in df_hist['Proceso'].values):
+                    if st in df_hist['Nombre'].values:
                     
-                    inf_alert = {'Alerta': type_alert[i],
-                                'Total_radicados':int(len(radicados)),
-                                'Umbral':float(th),
-                                'Cantidad_radicados_atipicos':int(outliers),
-                                'Proporcion':round(float(porcentaje),2),
-                                'Ejemplo_radicado_atipico':random.choice(ejemplo_rad_max),
-                                'Maximo':float(MAX),
-                                }
-                    
-                    alerts.append(inf_alert)
-        # Diferencia de radicados in/out
-        if dif > 0: 
-            inf_alert = {'Alerta': 'Diferencia de radicados in/out',
-                        'Diferencia': dif}
-            alerts.append(inf_alert)
+                        df_hist = df_hist.set_index("Nombre")
+                        df_temp = df_hist.loc[st]["Variables"][i][v]
+                        val = df_temp + list(val)
 
-        result['Alertas'] = alerts
-        if len(alerts) > 0: 
-            results.append(result)
+                        if len(val) <= Nmuestras: # Mantener las últimas n muestras para el análisis
+                            inf_val = {v:val}
+                            var.append(inf_val)
+                        else: 
+                            val = val[-Nmuestras:]
+                            inf_val = {v:val}
+                            var.append(inf_val)
+                    else:
+                        inf_val = {v:list(val)}
+                        var.append(inf_val)
+                else: 
+                    inf_val = {v:list(val)}
+                    var.append(inf_val)
+                
+                # Outliers
+                cant_outliers, th = find_outliers_IQR(val) # cantidad de radicados atípicos, threshold, valor máximo 
+                
+                result['TipoAnalisis'] = 'Estado'
+                result['Nombre'] = st
+                result['Servicio'] = service_dict[st]
+                result['Metrica'] = v
+                result['FechaCreacion'] = datetime.utcnow()
+                result['Umbral'] = float(round(th,2)) 
+                result['TotalRadicadosPeriodo'] = int(total_rad_periodo)
+                result['TotalRadicados'] = int(len(radicados.unique()))             
+                result['RadicadosSobreUmbral'] = int(cant_outliers)
+                result['PorcentajeRadicadosSobreUmbral'] = float(round(cant_outliers/len(radicados.unique())*100,2))
+                result['PeorRadicado'] = peorRadicado
+                result['ValorMetricaPeorRadicado'] = float(round(valMax,2))
+                result['DiferenciaRadicadosInOut'] = int(dif)
+                results.append(result)
+
+            hist['Variables'] = var        
+            historial.append(hist)
 
     
     # ANÁLISIS POR COMBINACIÓN DE ESTADOS
     variables = ['Procesos combinacion estado']
-    type_alert = ['Reprocesos por combinacion de estados']
-    for cst in comb_estado:
-        alerts = []
-        result = {}
-        result['Tipo_de_analisis'] = 'Combinacion de estados'
-        result['Nombre'] = cst
-        for i, v in enumerate(variables):
-            if cst in temp_Comb.index:
-                val = temp_Comb.loc[[cst]][v] # procesos de comb_estado "cst"
-                outliers, th, MAX = find_outliers_IQR(val) 
+    # type_alert = ['Reprocesos por combinacion de estados']
+    for idx, cst in enumerate(comb_estado):
+        var = []
+        hist = {}
+        if cst in df['Combinacion estado'].values:
+            hist['Nombre'] = cst
+            for i, v in enumerate(variables):
+                result = {}
+
+                # Radicados donde aparece comb_st
+                radicados = temp_Comb.loc[[cst]]['Radicado']
+
+                # Procesos de comb_estado "cst"
+                val = temp_Comb.loc[[cst]][v].astype(float).values 
+
+                # Máximo y peor radicado en el periodo
+                idx_max = np.argmax(val)
+                peorRadicado = radicados[idx_max]
+                valMax = val[idx_max]
                 
-                if outliers > 0:
-                    # porcentaje
-                    radicados = temp_Comb.loc[[cst]]['Radicado'].unique() # radicados donde aparece comb_st
-                    porcentaje = outliers/len(radicados)*100
-
-                    # porcentaje de radicados del proceso sobre los radicados totales 
-                    result['rads/total_rad'] = round(len(radicados)/len(total_rad)*100, 2)
-
-                    # radicados donde hay casos atípicos 
-                    ejemplo_rad_max = temp_Comb.loc[[cst]]['Radicado'][val==MAX].unique() # radicado donde se encuentra el máximo valor
-                        
-                    inf_alert = {'Alerta': type_alert[i],
-                                'Total_radicados':int(len(radicados)),
-                                'Umbral':float(th),
-                                'Cantidad_radicados_atipicos':int(outliers),
-                                'Proporcion':round(float(porcentaje),2),
-                                'Ejemplo_radicado_atipico':random.choice(ejemplo_rad_max),
-                                'Maximo':float(MAX),
-                                }
+                # Historial 
+                df_hist = pd.DataFrame(hist_data) 
+                if bool(hist_data) and (colog in df_hist['ColeccionLog'].values) and (proj in df_hist['Proyecto'].values) and (proc in df_hist['Proceso'].values):  
+                    if cst in df_hist['Nombre'].values:
                     
-                    alerts.append(inf_alert)
+                        df_hist = df_hist.set_index("Nombre")
+                        df_temp = df_hist.loc[cst]["Variables"][i][v]
+                        val = df_temp + list(val)
 
-        result['Alertas'] = alerts
-        if len(alerts) > 0:
-            results.append(result)       
+                        if len(val) <= Nmuestras: # Mantener las últimas Nmuestras muestras para el análisis
+                            inf_val = {v:val}
+                            var.append(inf_val)
+                        else: 
+                            val = val[-Nmuestras:]
+                            inf_val = {v:val}
+                            var.append(inf_val)
+                    else:
+                        inf_val = {v:list(val)}
+                        var.append(inf_val)
+                else: 
+                    inf_val = {v:list(val)}
+                    var.append(inf_val)
+                
+                # Outliers
+                cant_outliers, th = find_outliers_IQR(val) 
+
+                result['TipoAnalisis'] = 'Combinacion de estados'
+                result['Nombre'] = cst
+                result['Servicio'] = service_dict[df['Estado'][idx]] + '-' +service_dict[df['Estado Destino'][idx]]
+                result['Metrica'] = v
+                result['FechaCreacion'] = datetime.utcnow()
+                result['Umbral'] = float(round(th,2)) 
+                result['TotalRadicadosPeriodo'] = int(total_rad_periodo)
+                result['TotalRadicados'] = int(len(radicados.unique()))             
+                result['RadicadosSobreUmbral'] = int(cant_outliers)
+                result['PorcentajeRadicadosSobreUmbral'] = float(round(cant_outliers/len(radicados.unique())*100,2))
+                result['PeorRadicado'] = peorRadicado
+                result['ValorMetricaPeorRadicado'] = float(round(valMax,2))
+                results.append(result)
+
+            hist['Variables'] = var        
+            historial.append(hist)      
 
     # ANÁLISIS POR RADICADO
-    alerts = []
-    result = {}
-    result['Tipo_de_analisis'] = 'Radicado'
-    result['Nombre'] = 'No aplica'
-    variables = ['Procesos radicado','Cantidad estados x radicado','Dias radicado']
-    type_alert = ['Veces radicado','Estados radicado','Dias laborados por radicado']
-    for i, v in enumerate(variables):
-        val = temp_Rad[i][v] # dias de los radicados 
-        outliers, th, MAX = find_outliers_IQR(val) 
-
-        if outliers > 0:
-            
-            # porcentaje
-            porcentaje = outliers/len(total_rad)*100
-
-            # porcentaje de radicados sobre los radicados totales 
-            result['rads/total_rad'] = round(len(total_rad)/len(total_rad)*100, 2)
-            
-            # radicados donde hay casos atípicos 
-            ejemplo_rad_max = temp_Rad[i]['Radicado'][val==MAX].unique() # radicado donde se encuentra el máximo valor
-            
-            inf_alert = {'Alerta': type_alert[i],
-                        'Total_radicados':int(len(total_rad)),
-                        'Umbral':float(th),
-                        'Cantidad_radicados_atipicos':int(outliers),
-                        'Proporcion':round(float(porcentaje),2),
-                        'Ejemplo_radicado_atipico':random.choice(ejemplo_rad_max),
-                        'Maximo':float(MAX),
-                        }
-                    
-            alerts.append(inf_alert)
   
-    result['Alertas'] = alerts
-    if len(alerts) > 0:
-        results.append(result) 
+    var = []
+    hist = {}
+    hist['Nombre'] = 'No aplica'
+    variables = ['Veces radicado','Estados radicado','Dias radicado']
+    # type_alert = ['Veces radicado','Estados radicado','Dias laborados por radicado']
+    for i, v in enumerate(variables):
+        result = {}
+        # Procesos radicado, estados radicado o dias radicado 
+        val = temp_Rad[i][v].astype(float) 
+        # redondeo
+        if v == 'Dias radicado':
+            val = np.round(val.values,4)
+        else:
+            val = val.values
 
-    return sorted(results, key = lambda x: x['rads/total_rad'], reverse=True)
+        # Máximo y peor radicado en el periodo
+        idx_max = np.argmax(val)
+        peorRadicado = temp_Rad[i]['Radicado'][idx_max]
+        valMax = val[idx_max]
+            
+        # Historial
+        df_hist = pd.DataFrame(hist_data) 
+        if (bool(hist_data) and colog in df_hist['ColeccionLog'].values) and (proj in df_hist['Proyecto'].values) and (proc in df_hist['Proceso'].values):
+            if 'No aplica' in df_hist['Nombre'].values:
+                    
+                df_hist = df_hist.set_index("Nombre")
+                df_temp = df_hist.loc['No aplica']["Variables"][i][v]
+                val = df_temp + list(val)
+
+                if len(val) <= Nmuestras: # Mantener las últimas 1000 muestras para el análisis
+                    inf_val = {v:val}
+                    var.append(inf_val)
+                else: 
+                    val = val[-Nmuestras:]
+                    inf_val = {v:val}
+                    var.append(inf_val)
+            else:
+                inf_val = {v:list(val)}
+                var.append(inf_val)
+        else: 
+            inf_val = {v:list(val)}
+            var.append(inf_val)
+        
+        # Outliers
+        cant_outliers, th = find_outliers_IQR(val) 
+        idx_max = np.argmax(val)
+
+        result['Nombre'] = 'No aplica'
+        result['TipoAnalisis'] = 'Radicado'
+        result['Metrica'] = v
+        result['FechaCreacion'] = datetime.utcnow()
+        result['Umbral'] = float(round(th,2)) 
+        result['TotalRadicadosPeriodo'] = int(total_rad_periodo)
+        result['TotalRadicados'] = int(total_rad_periodo)             
+        result['RadicadosSobreUmbral'] = int(cant_outliers)
+        result['PorcentajeRadicadosSobreUmbral'] = float(round(cant_outliers/total_rad_periodo*100,2))
+        result['PeorRadicado'] = peorRadicado
+        result['ValorMetricaPeorRadicado'] = float(round(valMax,2))
+        results.append(result)        
+        
+    hist['Variables'] = var        
+    historial.append(hist) 
+
+    return results, historial
+
+
