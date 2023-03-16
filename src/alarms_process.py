@@ -1,8 +1,7 @@
 from datetime import datetime, timedelta
-import random
-import ast
 import numpy as np
 import pandas as pd
+import collections
 
 from utils import calculate_times
 
@@ -16,7 +15,7 @@ def find_outliers_IQR(val):
     return outliers, th
 
 
-def find_alerts(dataMongo, hist_data, colog):
+def find_alerts(dataMongo, hist_data, config):
     # Definir dataframe 
     df = pd.DataFrame(dataMongo)
     df['Radicado'] = df['Radicado'].astype(str)
@@ -54,8 +53,9 @@ def find_alerts(dataMongo, hist_data, colog):
     Nmuestras = int(5E5)
 
     # filtros de consulta
-    proj = df['Proyecto'].values[0]
-    proc = df['Proceso'].values[0]
+    cole = config['ColeccionLogs']
+    proj = config['Proyecto']
+    proc = config['Proceso']
 
     # ANÁLISIS POR ESTADO 
     variables = ['Procesos estado', 'Dias estado']
@@ -97,30 +97,37 @@ def find_alerts(dataMongo, hist_data, colog):
                 
                 # Historial 
                 df_hist = pd.DataFrame(hist_data) 
-                if bool(hist_data) and (colog in df_hist['ColeccionLog'].values) and (proj in df_hist['Proyecto'].values) and (proc in df_hist['Proceso'].values):
+                if bool(hist_data):
                     if st in df_hist['Nombre'].values:
                     
                         df_hist = df_hist.set_index("Nombre")
-                        df_temp = df_hist.loc[st]["Variables"][i][v]
-                        val = df_temp + list(val)
+                        CounterHist = collections.Counter(df_hist.loc[st]["Variables"][i])
+                        val = [float(x) for x in list(CounterHist.elements())] + list(val)
 
                         if len(val) <= Nmuestras: # Mantener las últimas n muestras para el análisis
-                            inf_val = {v:val}
-                            var.append(inf_val)
+                            strVal = [str(x) for x in val]
+                            CounterNew = collections.Counter(strVal)
+                            var.append(CounterNew)
                         else: 
                             val = val[-Nmuestras:]
-                            inf_val = {v:val}
-                            var.append(inf_val)
+                            strVal = [str(x) for x in val]
+                            CounterNew = collections.Counter(strVal)
+                            var.append(CounterNew)
                     else:
-                        inf_val = {v:list(val)}
-                        var.append(inf_val)
+                        strVal = [str(x) for x in val]
+                        CounterNew = collections.Counter(strVal)
+                        var.append(CounterNew)
                 else: 
-                    inf_val = {v:list(val)}
-                    var.append(inf_val)
+                    strVal = [str(x) for x in val]
+                    CounterNew = collections.Counter(strVal)
+                    var.append(CounterNew)
                 
                 # Outliers
                 cant_outliers, th = find_outliers_IQR(val) # cantidad de radicados atípicos, threshold, valor máximo 
                 
+                result['ColeccionLog'] = cole
+                result['Proyecto'] = proj
+                result['Proceso'] = proc
                 result['TipoAnalisis'] = 'Estado'
                 result['Nombre'] = st
                 result['Servicio'] = service_dict[st]
@@ -164,30 +171,37 @@ def find_alerts(dataMongo, hist_data, colog):
                 
                 # Historial 
                 df_hist = pd.DataFrame(hist_data) 
-                if bool(hist_data) and (colog in df_hist['ColeccionLog'].values) and (proj in df_hist['Proyecto'].values) and (proc in df_hist['Proceso'].values):  
+                if bool(hist_data):
                     if cst in df_hist['Nombre'].values:
                     
                         df_hist = df_hist.set_index("Nombre")
-                        df_temp = df_hist.loc[cst]["Variables"][i][v]
-                        val = df_temp + list(val)
+                        CounterHist = collections.Counter(df_hist.loc[cst]["Variables"][i])
+                        val = [float(x) for x in list(CounterHist.elements())] + list(val)
 
-                        if len(val) <= Nmuestras: # Mantener las últimas Nmuestras muestras para el análisis
-                            inf_val = {v:val}
-                            var.append(inf_val)
+                        if len(val) <= Nmuestras: # Mantener las últimas n muestras para el análisis
+                            strVal = [str(x) for x in val]
+                            CounterNew = collections.Counter(strVal)
+                            var.append(CounterNew)
                         else: 
                             val = val[-Nmuestras:]
-                            inf_val = {v:val}
-                            var.append(inf_val)
+                            strVal = [str(x) for x in val]
+                            CounterNew = collections.Counter(strVal)
+                            var.append(CounterNew)
                     else:
-                        inf_val = {v:list(val)}
-                        var.append(inf_val)
+                        strVal = [str(x) for x in val]
+                        CounterNew = collections.Counter(strVal)
+                        var.append(CounterNew)
                 else: 
-                    inf_val = {v:list(val)}
-                    var.append(inf_val)
+                    strVal = [str(x) for x in val]
+                    CounterNew = collections.Counter(strVal)
+                    var.append(CounterNew)
                 
                 # Outliers
                 cant_outliers, th = find_outliers_IQR(val) 
 
+                result['ColeccionLog'] = cole
+                result['Proyecto'] = proj
+                result['Proceso'] = proc
                 result['TipoAnalisis'] = 'Combinacion de estados'
                 result['Nombre'] = cst
                 result['Servicio'] = service_dict[df['Estado'][idx]] + '-' +service_dict[df['Estado Destino'][idx]]
@@ -206,7 +220,6 @@ def find_alerts(dataMongo, hist_data, colog):
             historial.append(hist)      
 
     # ANÁLISIS POR RADICADO
-  
     var = []
     hist = {}
     hist['Nombre'] = 'No aplica'
@@ -226,34 +239,42 @@ def find_alerts(dataMongo, hist_data, colog):
         idx_max = np.argmax(val)
         peorRadicado = temp_Rad[i]['Radicado'][idx_max]
         valMax = val[idx_max]
-            
-        # Historial
+
+
+        # Historial 
         df_hist = pd.DataFrame(hist_data) 
-        if (bool(hist_data) and colog in df_hist['ColeccionLog'].values) and (proj in df_hist['Proyecto'].values) and (proc in df_hist['Proceso'].values):
+        if bool(hist_data):
             if 'No aplica' in df_hist['Nombre'].values:
                     
                 df_hist = df_hist.set_index("Nombre")
-                df_temp = df_hist.loc['No aplica']["Variables"][i][v]
-                val = df_temp + list(val)
+                CounterHist = collections.Counter(df_hist.loc['No aplica']['Variables'][i])
+                val = [float(x) for x in list(CounterHist.elements())] + list(val)
 
-                if len(val) <= Nmuestras: # Mantener las últimas 1000 muestras para el análisis
-                    inf_val = {v:val}
-                    var.append(inf_val)
+                if len(val) <= Nmuestras: # Mantener las últimas n muestras para el análisis
+                    strVal = [str(x) for x in val]
+                    CounterNew = collections.Counter(strVal)
+                    var.append(CounterNew)
                 else: 
                     val = val[-Nmuestras:]
-                    inf_val = {v:val}
-                    var.append(inf_val)
+                    strVal = [str(x) for x in val]
+                    CounterNew = collections.Counter(strVal)
+                    var.append(CounterNew)
             else:
-                inf_val = {v:list(val)}
-                var.append(inf_val)
+                strVal = [str(x) for x in val]
+                CounterNew = collections.Counter(strVal)
+                var.append(CounterNew)
         else: 
-            inf_val = {v:list(val)}
-            var.append(inf_val)
+            strVal = [str(x) for x in val]
+            CounterNew = collections.Counter(strVal)
+            var.append(CounterNew)
         
         # Outliers
         cant_outliers, th = find_outliers_IQR(val) 
         idx_max = np.argmax(val)
 
+        result['ColeccionLog'] = cole
+        result['Proyecto'] = proj
+        result['Proceso'] = proc
         result['Nombre'] = 'No aplica'
         result['TipoAnalisis'] = 'Radicado'
         result['Metrica'] = v
@@ -265,7 +286,7 @@ def find_alerts(dataMongo, hist_data, colog):
         result['PorcentajeRadicadosSobreUmbral'] = float(round(cant_outliers/total_rad_periodo*100,2))
         result['PeorRadicado'] = peorRadicado
         result['ValorMetricaPeorRadicado'] = float(round(valMax,2))
-        results.append(result)        
+        results.append(result)      
         
     hist['Variables'] = var        
     historial.append(hist) 

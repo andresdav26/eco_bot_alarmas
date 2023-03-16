@@ -56,12 +56,13 @@ def auto_alarms():
         )
 
         logger.info(f'Actualizando {configs[0]["ColeccionLogs"]} {configs[0]["Proyecto"]}...'.replace('None', ''))
+        
         # ========= alarmas process ========
-        periodo = "202201"
+        periodo = f'{now.year}{now.month:02d}'
+        collection=config_to_update['ColeccionLogs']
+        # periodo = "202303"
         logs_data = fetch_data(
-            # collection=config_to_update['ColeccionLogs'],
-            collection="Coomeva",
-            # period=f'{now.year}{now.month:02d}',
+            collection=collection,
             period=periodo,
             conn=MONGODB_CONN_LOGS
             )
@@ -73,8 +74,41 @@ def auto_alarms():
 
             logger.info(f'Procesando {len(logs_data)} registros de logs.')
 
+            condPer = [p for p in config_collection.find({'_id': config_to_update['_id'],'PeriodosConsultados': periodo})]
+            if bool(condPer): 
+                idx = condPer[0]['PeriodosConsultados'].index(periodo)
+                OldNumReg = condPer[0]['CantRegistros'][idx]
+
+                difReg = len(logs_data) - OldNumReg # Difference between old and new registers number by a period 
+                if difReg > 0:
+                    logs_data = logs_data[-difReg:]
+                    # updating periods - registers 
+                    config_collection.update_one(
+                        filter={'_id': config_to_update['_id']},
+                        update={"$set": {"CantRegistros." + str(idx): OldNumReg+difReg}},
+                        )
+                    logger.info(f'Existen {difReg} registros nuevos para el periodo {periodo}')
+                else:
+                    logger.info(f'No existen registros nuevos.')
+                    config_collection.update_one(
+                        filter={'_id': config_to_update['_id']},
+                        update={'$set': {'Actualizando': False, 'UltimaActualizacion': datetime.utcnow()}}
+                        )
+                    return auto_alarms()
+            else:
+                # updating periods - registers 
+                config_collection.update_one(
+                    filter={'_id': config_to_update['_id']},
+                    update={"$addToSet": {'PeriodosConsultados': periodo, "CantRegistros": len(logs_data)}},
+                )
+
             t0 = time.time()
-            alarms, historial = find_alerts(logs_data, hist_data, config_to_update['ColeccionLogs'])
+            # only historial data that match with ColeccionLog, Proyecto and Proceso 
+            hist_data = [p for p in hist_collection.find({"ColeccionLog":config_to_update["ColeccionLogs"],
+                                                          "Proyecto":config_to_update["Proyecto"], 
+                                                          "Proceso":config_to_update["Proceso"]})]
+            
+            alarms, historial = find_alerts(logs_data, hist_data, config_to_update)
             logger.info(f'Tiempo: {round(time.time()-t0,2)} seg.')
             
             update_end = datetime.utcnow()
@@ -87,35 +121,19 @@ def auto_alarms():
                 hist_collection.update_one(
                     filter={'$and': [
                         {'ColeccionLog': hist['ColeccionLog']},
-                        {'Nombre': hist['Nombre']},
                         {'Proyecto': hist['Proyecto']},
                         {'Proceso': hist['Proceso']},
+                        {'Nombre': hist['Nombre']},
                         ]},
                     update={'$set': hist},
                     upsert=True
                 )
 
             for alarm in alarms:
-                alarm['ColeccionLog'] = config_to_update['ColeccionLogs']
-                alarm['Proyecto'] = config_to_update['Proyecto']
-                alarm['Proceso'] = config_to_update['Proceso']
-                # alarm['Periodo'] = f'{now.year}{now.month:02d}'
                 alarm['Periodo'] = periodo
                 alarm['UltimaActualizacion'] = update_end
 
-                alarms_collection.update_one(
-                    filter={'$and': [
-                        {'TipoAnalisis': alarm['TipoAnalisis']},
-                        {'Metrica': alarm['Metrica']},
-                        {'Nombre': alarm['Nombre']},
-                        {'Periodo': alarm['Periodo']},
-                        {'ColeccionLog': alarm['ColeccionLog']},
-                        {'Proyecto': alarm['Proyecto']},
-                        {'Proceso': alarm['Proceso']},
-                        ]},
-                    update={'$set': alarm},
-                    upsert=True
-                )
+                alarms_collection.insert_one(alarm)
 
         else:
             logger.warning(f'No se obtubieron datos de logs.')
