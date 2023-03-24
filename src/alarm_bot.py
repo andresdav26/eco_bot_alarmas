@@ -55,12 +55,12 @@ def auto_alarms():
             update={'$set':{'Actualizando': True}}
         )
 
-        logger.info(f'Actualizando {configs[0]["ColeccionLogs"]} {configs[0]["Proyecto"]}...'.replace('None', ''))
+        logger.info(f'Actualizando {configs[0]["ColeccionLogs"]} {configs[0]["Proceso"]}...'.replace('None', ''))
         
         # ========= alarmas process ========
-        periodo = f'{now.year}{now.month:02d}'
+        # periodo = f'{now.year}{now.month:02d}'
         collection=config_to_update['ColeccionLogs']
-        # periodo = "202303"
+        periodo = "202303"
         logs_data = fetch_data(
             collection=collection,
             period=periodo,
@@ -71,8 +71,13 @@ def auto_alarms():
             )
 
         if bool(logs_data):
+            
+            # only historial data that match with ColeccionLog, Proyecto and Proceso 
+            hist_data = [p for p in hist_collection.find({"ColeccionLog":config_to_update["ColeccionLogs"],
+                                                          "Proyecto":config_to_update["Proyecto"], 
+                                                          "Proceso":config_to_update["Proceso"]})]
 
-            logger.info(f'Procesando {len(logs_data)} registros de logs.')
+            logger.info(f'Procesando {len(logs_data)} registros de logs en el periodo {periodo}')
 
             condPer = [p for p in config_collection.find({'_id': config_to_update['_id'],'PeriodosConsultados': periodo})]
             if bool(condPer): 
@@ -81,13 +86,16 @@ def auto_alarms():
 
                 difReg = len(logs_data) - OldNumReg # Difference between old and new registers number by a period 
                 if difReg > 0:
-                    logs_data = logs_data[-difReg:]
                     # updating periods - registers 
                     config_collection.update_one(
                         filter={'_id': config_to_update['_id']},
                         update={"$set": {"CantRegistros." + str(idx): OldNumReg+difReg}},
                         )
-                    logger.info(f'Existen {difReg} registros nuevos para el periodo {periodo}')
+                    logger.info(f'Existen {difReg} registros nuevos.')
+                    # Alarms
+                    t0 = time.time()
+                    alarms, historial = find_alerts(logs_data, hist_data, config_to_update, difReg)
+                    logger.info(f'Tiempo: {round(time.time()-t0,2)} seg.')
                 else:
                     logger.info(f'No existen registros nuevos.')
                     config_collection.update_one(
@@ -101,16 +109,11 @@ def auto_alarms():
                     filter={'_id': config_to_update['_id']},
                     update={"$addToSet": {'PeriodosConsultados': periodo, "CantRegistros": len(logs_data)}},
                 )
+                # Alarms
+                t0 = time.time()
+                alarms, historial = find_alerts(logs_data, hist_data, config_to_update)
+                logger.info(f'Tiempo: {round(time.time()-t0,2)} seg.')
 
-            t0 = time.time()
-            # only historial data that match with ColeccionLog, Proyecto and Proceso 
-            hist_data = [p for p in hist_collection.find({"ColeccionLog":config_to_update["ColeccionLogs"],
-                                                          "Proyecto":config_to_update["Proyecto"], 
-                                                          "Proceso":config_to_update["Proceso"]})]
-            
-            alarms, historial = find_alerts(logs_data, hist_data, config_to_update)
-            logger.info(f'Tiempo: {round(time.time()-t0,2)} seg.')
-            
             update_end = datetime.utcnow()
 
             for hist in historial:
@@ -131,11 +134,10 @@ def auto_alarms():
 
             for alarm in alarms:
                 alarm['Periodo'] = periodo
-                alarm['UltimaActualizacion'] = update_end
-
                 alarms_collection.insert_one(alarm)
 
         else:
+            update_end = datetime.utcnow()
             logger.warning(f'No se obtubieron datos de logs.')
         # =========================
         config_collection.update_one(

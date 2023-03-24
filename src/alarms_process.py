@@ -10,12 +10,11 @@ def find_outliers_IQR(val):
     q75, q25  = np.percentile(val, [75, 25])
     IQR = q75 - q25
     th = q75 + 1.5*IQR
-    outliers = (val > th).sum()
     
-    return outliers, th
+    return th
 
 
-def find_alerts(dataMongo, hist_data, config):
+def find_alerts(dataMongo, hist_data, config, difReg=None):
     # Definir dataframe 
     df = pd.DataFrame(dataMongo)
     df['Radicado'] = df['Radicado'].astype(str)
@@ -33,13 +32,13 @@ def find_alerts(dataMongo, hist_data, config):
     comb_estado = df['Combinacion estado'].unique() # Combinación de estados
 
     temp_Est = [df.groupby(by=["Radicado","Estado"])["Estado"].count().reset_index(0).rename(columns={'Estado':'Procesos estado'}), # procesos por estados 
-                df.groupby(by=['Radicado', 'Estado'])['tiempo_estado'].sum().reset_index(0).rename(columns={'tiempo_estado':'Dias estado'})] # días por estado
+                df.groupby(by=['Radicado', 'Estado'])['tiempo_estado'].sum().reset_index(0).rename(columns={'tiempo_estado':'Dias estado'}).round(4)] # días por estado
 
     temp_Comb = df.groupby(by=["Radicado","Combinacion estado"])["Combinacion estado"].count().reset_index(0).rename(columns={'Combinacion estado':'Procesos combinacion estado'}) # procesos por combinación 
 
     temp_Rad = [temp_Est[0].groupby(by=["Radicado"]).sum().reset_index(0).rename(columns={'Procesos estado':'Veces radicado'}), # procesos por radicado (sumatoria de los procesos que contiene cada estado)
                 temp_Est[0].groupby(by=["Radicado"]).count().reset_index(0).rename(columns={'Procesos estado':'Estados radicado'}),  # cantidad estados por radicado
-                df.groupby(by=['Radicado'])['tiempo_estado'].sum().reset_index(0).rename(columns={'tiempo_estado':'Dias radicado'})] # días por radicado
+                df.groupby(by=['Radicado'])['tiempo_estado'].sum().reset_index(0).rename(columns={'tiempo_estado':'Dias radicado'}).round(4)] # días por radicado
 
     # Serivicios 
     df_serv1 = df[['Estado', 'Servicio']].drop_duplicates().rename(columns={'Estado': 'estado'})
@@ -50,7 +49,7 @@ def find_alerts(dataMongo, hist_data, config):
     # MAIN 
     results = []
     historial = []
-    Nmuestras = int(5E5)
+    Nmuestras = int(2E6)
 
     # filtros de consulta
     cole = config['ColeccionLogs']
@@ -83,17 +82,15 @@ def find_alerts(dataMongo, hist_data, config):
                 radicados = temp_Est[i].loc[[st]]['Radicado']
 
                 # Procesos del estado "st" o días del estado "st"
-                val = temp_Est[i].loc[[st]][v].astype(float) 
-                # redondeo
-                if v == 'Dias estado':
-                    val = np.round(val.values,4)
-                else:
-                    val = val.values 
+                valPer = temp_Est[i].loc[[st]][v].astype(float).values  
                 
+                # Umbral periodo
+                thPer = find_outliers_IQR(valPer)
+
                 # Máximo y peor radicado en el periodo
-                idx_max = np.argmax(val)
+                idx_max = np.argmax(valPer)
                 peorRadicado = radicados[idx_max]
-                valMax = val[idx_max]
+                valMax = valPer[idx_max]
                 
                 # Historial 
                 df_hist = pd.DataFrame(hist_data) 
@@ -102,45 +99,62 @@ def find_alerts(dataMongo, hist_data, config):
                     
                         df_hist = df_hist.set_index("Nombre")
                         CounterHist = collections.Counter(df_hist.loc[st]["Variables"][i])
-                        val = [float(x) for x in list(CounterHist.elements())] + list(val)
+                        if difReg is not None:
+                            tempDif = temp_Est[i][-difReg:]
+                            if st in tempDif.index:
+                                valDif = tempDif.loc[[st]][v].astype(float).values
+                                valHist = [float(x) for x in list(CounterHist.elements())] + list(valDif)
+                            else: 
+                                valHist = [float(x) for x in list(CounterHist.elements())]
+                        else:
+                            valHist = [float(x) for x in list(CounterHist.elements())] + list(valPer)
 
-                        if len(val) <= Nmuestras: # Mantener las últimas n muestras para el análisis
-                            strVal = [str(x) for x in val]
+                        if len(valHist) <= Nmuestras: # Mantener las últimas n muestras para el análisis
+                            strVal = [str(x) for x in valHist]
                             CounterNew = collections.Counter(strVal)
                             var.append(CounterNew)
                         else: 
-                            val = val[-Nmuestras:]
-                            strVal = [str(x) for x in val]
+                            valHist = valHist[-Nmuestras:]
+                            strVal = [str(x) for x in valHist]
                             CounterNew = collections.Counter(strVal)
                             var.append(CounterNew)
+
+                        # Outliers
+                        thHist = find_outliers_IQR(valHist) 
                     else:
-                        strVal = [str(x) for x in val]
+                        strVal = [str(x) for x in valPer]
                         CounterNew = collections.Counter(strVal)
                         var.append(CounterNew)
+                        # Outliers
+                        thHist = find_outliers_IQR(valPer)
                 else: 
-                    strVal = [str(x) for x in val]
+                    strVal = [str(x) for x in valPer]
                     CounterNew = collections.Counter(strVal)
                     var.append(CounterNew)
+                    # Outliers
+                    thHist = find_outliers_IQR(valPer)
                 
-                # Outliers
-                cant_outliers, th = find_outliers_IQR(val) # cantidad de radicados atípicos, threshold, valor máximo 
-                
+                # cantidad de valores que superan el umbral del historial
+                cant_outliers = (valPer > thHist).sum()
+
                 result['ColeccionLog'] = cole
                 result['Proyecto'] = proj
                 result['Proceso'] = proc
-                result['TipoAnalisis'] = 'Estado'
                 result['Nombre'] = st
                 result['Servicio'] = service_dict[st]
+                result['TipoAnalisis'] = 'Estado'
                 result['Metrica'] = v
                 result['FechaCreacion'] = datetime.utcnow()
-                result['Umbral'] = float(round(th,2)) 
+                result['UmbralHistorial'] = float(round(thHist,2)) 
+                result['UmbralPeriodo'] = float(round(thPer,2)) 
                 result['TotalRadicadosPeriodo'] = int(total_rad_periodo)
                 result['TotalRadicados'] = int(len(radicados.unique()))             
-                result['RadicadosSobreUmbral'] = int(cant_outliers)
+                result['RadicadosSobreUmbral'] = int(cant_outliers) #####
                 result['PorcentajeRadicadosSobreUmbral'] = float(round(cant_outliers/len(radicados.unique())*100,2))
                 result['PeorRadicado'] = peorRadicado
                 result['ValorMetricaPeorRadicado'] = float(round(valMax,2))
-                result['DiferenciaRadicadosInOut'] = int(dif)
+                if v == 'Procesos estado':
+                    result['DiferenciaRadicadosInOut'] = int(dif)
                 results.append(result)
 
             hist['Variables'] = var        
@@ -162,12 +176,15 @@ def find_alerts(dataMongo, hist_data, config):
                 radicados = temp_Comb.loc[[cst]]['Radicado']
 
                 # Procesos de comb_estado "cst"
-                val = temp_Comb.loc[[cst]][v].astype(float).values 
+                valPer = temp_Comb.loc[[cst]][v].astype(float).values 
+
+                # Umbral periodo
+                thPer = find_outliers_IQR(valPer)
 
                 # Máximo y peor radicado en el periodo
-                idx_max = np.argmax(val)
+                idx_max = np.argmax(valPer)
                 peorRadicado = radicados[idx_max]
-                valMax = val[idx_max]
+                valMax = valPer[idx_max]
                 
                 # Historial 
                 df_hist = pd.DataFrame(hist_data) 
@@ -176,41 +193,58 @@ def find_alerts(dataMongo, hist_data, config):
                     
                         df_hist = df_hist.set_index("Nombre")
                         CounterHist = collections.Counter(df_hist.loc[cst]["Variables"][i])
-                        val = [float(x) for x in list(CounterHist.elements())] + list(val)
+                        # Si hay registros nuevos solo agrego los nuevos valores
+                        if difReg is not None:
+                            tempDif = temp_Comb[-difReg:]
+                            if cst in tempDif.index:
+                                valDif = tempDif.loc[[cst]][v].astype(float).values
+                                valHist = [float(x) for x in list(CounterHist.elements())] + list(valDif)
+                            else: 
+                                valHist = [float(x) for x in list(CounterHist.elements())]
+                        else:
+                            valHist = [float(x) for x in list(CounterHist.elements())] + list(valPer)
 
-                        if len(val) <= Nmuestras: # Mantener las últimas n muestras para el análisis
-                            strVal = [str(x) for x in val]
+                        if len(valHist) <= Nmuestras: # Mantener las últimas n muestras para el análisis
+                            strVal = [str(x) for x in valHist]
                             CounterNew = collections.Counter(strVal)
                             var.append(CounterNew)
                         else: 
-                            val = val[-Nmuestras:]
-                            strVal = [str(x) for x in val]
+                            valHist = valHist[-Nmuestras:]
+                            strVal = [str(x) for x in valHist]
                             CounterNew = collections.Counter(strVal)
                             var.append(CounterNew)
+
+                        # Outliers
+                        thHist = find_outliers_IQR(valHist)
                     else:
-                        strVal = [str(x) for x in val]
+                        strVal = [str(x) for x in valPer]
                         CounterNew = collections.Counter(strVal)
                         var.append(CounterNew)
+                        # Outliers
+                        thHist = find_outliers_IQR(valPer)
                 else: 
-                    strVal = [str(x) for x in val]
+                    strVal = [str(x) for x in valPer]
                     CounterNew = collections.Counter(strVal)
                     var.append(CounterNew)
+                    # Outliers
+                    thHist = find_outliers_IQR(valPer)
                 
-                # Outliers
-                cant_outliers, th = find_outliers_IQR(val) 
+                # cantidad de valores que superan el umbral del historial
+                cant_outliers = (valPer > thHist).sum()
 
                 result['ColeccionLog'] = cole
                 result['Proyecto'] = proj
                 result['Proceso'] = proc
-                result['TipoAnalisis'] = 'Combinacion de estados'
                 result['Nombre'] = cst
                 result['Servicio'] = service_dict[df['Estado'][idx]] + '-' +service_dict[df['Estado Destino'][idx]]
+                result['TipoAnalisis'] = 'Combinacion de estados'
                 result['Metrica'] = v
                 result['FechaCreacion'] = datetime.utcnow()
-                result['Umbral'] = float(round(th,2)) 
+                result['UmbralHistorial'] = float(round(thHist,2))
+                result['UmbralPeriodo'] = float(round(thPer,2))  
                 result['TotalRadicadosPeriodo'] = int(total_rad_periodo)
                 result['TotalRadicados'] = int(len(radicados.unique()))             
-                result['RadicadosSobreUmbral'] = int(cant_outliers)
+                result['RadicadosSobreUmbral'] = int(cant_outliers)  
                 result['PorcentajeRadicadosSobreUmbral'] = float(round(cant_outliers/len(radicados.unique())*100,2))
                 result['PeorRadicado'] = peorRadicado
                 result['ValorMetricaPeorRadicado'] = float(round(valMax,2))
@@ -228,18 +262,15 @@ def find_alerts(dataMongo, hist_data, config):
     for i, v in enumerate(variables):
         result = {}
         # Procesos radicado, estados radicado o dias radicado 
-        val = temp_Rad[i][v].astype(float) 
-        # redondeo
-        if v == 'Dias radicado':
-            val = np.round(val.values,4)
-        else:
-            val = val.values
+        valPer = temp_Rad[i][v].astype(float).values
+        
+        # Umbral periodo
+        thPer = find_outliers_IQR(valPer)
 
         # Máximo y peor radicado en el periodo
-        idx_max = np.argmax(val)
+        idx_max = np.argmax(valPer)
         peorRadicado = temp_Rad[i]['Radicado'][idx_max]
-        valMax = val[idx_max]
-
+        valMax = valPer[idx_max]
 
         # Historial 
         df_hist = pd.DataFrame(hist_data) 
@@ -248,29 +279,41 @@ def find_alerts(dataMongo, hist_data, config):
                     
                 df_hist = df_hist.set_index("Nombre")
                 CounterHist = collections.Counter(df_hist.loc['No aplica']['Variables'][i])
-                val = [float(x) for x in list(CounterHist.elements())] + list(val)
+                # Si hay registros nuevos solo agrego los nuevos valores
+                if difReg is not None:
+                    tempDif = temp_Rad[i][-difReg:]
+                    valDif = tempDif[v].astype(float).values
+                    valHist = [float(x) for x in list(CounterHist.elements())] + list(valDif)
+                else:
+                    valHist = [float(x) for x in list(CounterHist.elements())] + list(valPer)
 
-                if len(val) <= Nmuestras: # Mantener las últimas n muestras para el análisis
-                    strVal = [str(x) for x in val]
+                if len(valHist) <= Nmuestras: # Mantener las últimas n muestras para el análisis
+                    strVal = [str(x) for x in valHist]
                     CounterNew = collections.Counter(strVal)
                     var.append(CounterNew)
                 else: 
-                    val = val[-Nmuestras:]
-                    strVal = [str(x) for x in val]
+                    valHist = valHist[-Nmuestras:]
+                    strVal = [str(x) for x in valHist]
                     CounterNew = collections.Counter(strVal)
                     var.append(CounterNew)
+
+                # Outliers
+                thHist = find_outliers_IQR(valHist)
             else:
-                strVal = [str(x) for x in val]
+                strVal = [str(x) for x in valPer]
                 CounterNew = collections.Counter(strVal)
                 var.append(CounterNew)
+                # Outliers
+                thHist = find_outliers_IQR(valPer)
         else: 
-            strVal = [str(x) for x in val]
+            strVal = [str(x) for x in valPer]
             CounterNew = collections.Counter(strVal)
             var.append(CounterNew)
-        
-        # Outliers
-        cant_outliers, th = find_outliers_IQR(val) 
-        idx_max = np.argmax(val)
+            # Outliers
+            thHist = find_outliers_IQR(valPer)
+
+        # cantidad de valores que superan el umbral del historial
+        cant_outliers = (valPer > thHist).sum() 
 
         result['ColeccionLog'] = cole
         result['Proyecto'] = proj
@@ -279,7 +322,8 @@ def find_alerts(dataMongo, hist_data, config):
         result['TipoAnalisis'] = 'Radicado'
         result['Metrica'] = v
         result['FechaCreacion'] = datetime.utcnow()
-        result['Umbral'] = float(round(th,2)) 
+        result['UmbralHistorial'] = float(round(thHist,2)) 
+        result['UmbralPeriodo'] = float(round(thPer,2))
         result['TotalRadicadosPeriodo'] = int(total_rad_periodo)
         result['TotalRadicados'] = int(total_rad_periodo)             
         result['RadicadosSobreUmbral'] = int(cant_outliers)
