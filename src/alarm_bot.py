@@ -58,9 +58,9 @@ def auto_alarms():
         logger.info(f'Actualizando {configs[0]["ColeccionLogs"]} {configs[0]["Proceso"]}...'.replace('None', ''))
         
         # ========= alarmas process ========
-        # periodo = f'{now.year}{now.month:02d}'
+        periodo = f'{now.year}{now.month:02d}'
         collection=config_to_update['ColeccionLogs']
-        periodo = "202303"
+        # periodo = "202303"
         logs_data = fetch_data(
             collection=collection,
             period=periodo,
