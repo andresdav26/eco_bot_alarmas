@@ -14,9 +14,8 @@ def find_outliers_IQR(val):
     return th
 
 
-def find_alerts(dataMongo, hist_data, config, difReg=None):
-    # Definir dataframe 
-    df = pd.DataFrame(dataMongo)
+def find_alerts(df, hist_data, config, difReg=None):
+    df = df.reset_index(drop=True)
     df['Radicado'] = df['Radicado'].astype(str)
     df['Combinacion estado'] = df['Estado']+'-'+df['Estado Destino'] 
 
@@ -145,16 +144,15 @@ def find_alerts(dataMongo, hist_data, config, difReg=None):
                 result['TipoAnalisis'] = 'Estado'
                 result['Metrica'] = v
                 result['FechaCreacion'] = datetime.utcnow()
-                result['UmbralHistorial'] = float(round(thHist,2)) 
-                result['UmbralPeriodo'] = float(round(thPer,2)) 
+                result['UmbralHistorial'] = float(round(thHist,6)) 
+                result['UmbralPeriodo'] = float(round(thPer,6)) 
                 result['TotalRadicadosPeriodo'] = int(total_rad_periodo)
                 result['TotalRadicados'] = int(len(radicados.unique()))             
                 result['RadicadosSobreUmbral'] = int(cant_outliers) #####
                 result['PorcentajeRadicadosSobreUmbral'] = float(round(cant_outliers/len(radicados.unique())*100,2))
                 result['PeorRadicado'] = peorRadicado
                 result['ValorMetricaPeorRadicado'] = float(round(valMax,2))
-                if v == 'Procesos estado':
-                    result['DiferenciaRadicadosInOut'] = int(dif)
+                result['DiferenciaRadicadosInOut'] = int(dif)
                 results.append(result)
 
             hist['Variables'] = var        
@@ -240,8 +238,8 @@ def find_alerts(dataMongo, hist_data, config, difReg=None):
                 result['TipoAnalisis'] = 'Combinacion de estados'
                 result['Metrica'] = v
                 result['FechaCreacion'] = datetime.utcnow()
-                result['UmbralHistorial'] = float(round(thHist,2))
-                result['UmbralPeriodo'] = float(round(thPer,2))  
+                result['UmbralHistorial'] = float(round(thHist,6))
+                result['UmbralPeriodo'] = float(round(thPer,6))  
                 result['TotalRadicadosPeriodo'] = int(total_rad_periodo)
                 result['TotalRadicados'] = int(len(radicados.unique()))             
                 result['RadicadosSobreUmbral'] = int(cant_outliers)  
@@ -322,8 +320,8 @@ def find_alerts(dataMongo, hist_data, config, difReg=None):
         result['TipoAnalisis'] = 'Radicado'
         result['Metrica'] = v
         result['FechaCreacion'] = datetime.utcnow()
-        result['UmbralHistorial'] = float(round(thHist,2)) 
-        result['UmbralPeriodo'] = float(round(thPer,2))
+        result['UmbralHistorial'] = float(round(thHist,6)) 
+        result['UmbralPeriodo'] = float(round(thPer,6))
         result['TotalRadicadosPeriodo'] = int(total_rad_periodo)
         result['TotalRadicados'] = int(total_rad_periodo)             
         result['RadicadosSobreUmbral'] = int(cant_outliers)

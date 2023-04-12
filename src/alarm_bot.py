@@ -6,6 +6,7 @@ import sys
 from pymongo import MongoClient
 from mongodb import fetch_data, fetch_data_hist
 from alarms_process import find_alerts
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -58,83 +59,89 @@ def auto_alarms():
         logger.info(f'Actualizando {configs[0]["ColeccionLogs"]} {configs[0]["Proceso"]}...'.replace('None', ''))
         
         # ========= alarmas process ========
-        periodo = f'{now.year}{now.month:02d}'
+        nowDate = datetime.utcnow().replace(hour=0,minute=0,second=0,microsecond=0) 
         collection=config_to_update['ColeccionLogs']
-        # periodo = "202303"
-        logs_data = fetch_data(
+        project=config_to_update['Proyecto']
+        process=config_to_update['Proceso']
+
+        logs_data, periodos = fetch_data(
             collection=collection,
-            period=periodo,
-            conn=MONGODB_CONN_LOGS
+            project=project,
+            process=process,
+            conn=MONGODB_CONN_LOGS,
+            period="202303", # en caso de analizar manualmente por periodo (escribir el periodo deseado)
+            nowDate=nowDate,
             )
         hist_data = fetch_data_hist(
             collection=hist_collection,
             )
-
         if bool(logs_data):
-            
-            # only historial data that match with ColeccionLog, Proyecto and Proceso 
-            hist_data = [p for p in hist_collection.find({"ColeccionLog":config_to_update["ColeccionLogs"],
-                                                          "Proyecto":config_to_update["Proyecto"], 
-                                                          "Proceso":config_to_update["Proceso"]})]
 
-            logger.info(f'Procesando {len(logs_data)} registros de logs en el periodo {periodo}')
+            df_logs_data = pd.DataFrame(logs_data).set_index('Periodo')
+            for periodo in periodos: 
+                # only historial data that match with ColeccionLog, Proyecto and Proceso 
+                hist_data = [p for p in hist_collection.find({"ColeccionLog":collection,
+                                                            "Proyecto":project, 
+                                                            "Proceso":process})]
 
-            condPer = [p for p in config_collection.find({'_id': config_to_update['_id'],'PeriodosConsultados': periodo})]
-            if bool(condPer): 
-                idx = condPer[0]['PeriodosConsultados'].index(periodo)
-                OldNumReg = condPer[0]['CantRegistros'][idx]
+                logger.info(f'Procesando {len(df_logs_data.loc[periodo])} registros de logs en el periodo {periodo}')
 
-                difReg = len(logs_data) - OldNumReg # Difference between old and new registers number by a period 
-                if difReg > 0:
+                condPer = [p for p in config_collection.find({'_id': config_to_update['_id'],'PeriodosConsultados': periodo})]
+                if bool(condPer): 
+                    idx = condPer[0]['PeriodosConsultados'].index(periodo)
+                    OldNumReg = condPer[0]['CantRegistros'][idx]
+
+                    difReg = len(df_logs_data.loc[periodo]) - OldNumReg # Difference between old and new registers number by a period 
+                    if difReg > 0:
+                        # updating periods - registers 
+                        config_collection.update_one(
+                            filter={'_id': config_to_update['_id']},
+                            update={"$set": {"CantRegistros." + str(idx): OldNumReg+difReg}},
+                            )
+                        logger.info(f'Existen {difReg} registros nuevos.')
+                        # Alarms
+                        t0 = time.time()
+                        alarms, historial = find_alerts(df_logs_data.loc[periodo], hist_data, config_to_update, difReg)
+                        logger.info(f'Tiempo: {round(time.time()-t0,2)} seg.')
+                    else:
+                        logger.info(f'No existen registros nuevos.')
+                        config_collection.update_one(
+                            filter={'_id': config_to_update['_id']},
+                            update={'$set': {'Actualizando': False, 'UltimaActualizacion': datetime.utcnow()}}
+                            )
+                        continue
+                else:
                     # updating periods - registers 
                     config_collection.update_one(
                         filter={'_id': config_to_update['_id']},
-                        update={"$set": {"CantRegistros." + str(idx): OldNumReg+difReg}},
-                        )
-                    logger.info(f'Existen {difReg} registros nuevos.')
+                        update={"$addToSet": {'PeriodosConsultados': periodo, "CantRegistros": len(df_logs_data.loc[periodo])}},
+                    )
                     # Alarms
                     t0 = time.time()
-                    alarms, historial = find_alerts(logs_data, hist_data, config_to_update, difReg)
+                    alarms, historial = find_alerts(df_logs_data.loc[periodo], hist_data, config_to_update)
                     logger.info(f'Tiempo: {round(time.time()-t0,2)} seg.')
-                else:
-                    logger.info(f'No existen registros nuevos.')
-                    config_collection.update_one(
-                        filter={'_id': config_to_update['_id']},
-                        update={'$set': {'Actualizando': False, 'UltimaActualizacion': datetime.utcnow()}}
-                        )
-                    return auto_alarms()
-            else:
-                # updating periods - registers 
-                config_collection.update_one(
-                    filter={'_id': config_to_update['_id']},
-                    update={"$addToSet": {'PeriodosConsultados': periodo, "CantRegistros": len(logs_data)}},
-                )
-                # Alarms
-                t0 = time.time()
-                alarms, historial = find_alerts(logs_data, hist_data, config_to_update)
-                logger.info(f'Tiempo: {round(time.time()-t0,2)} seg.')
 
-            update_end = datetime.utcnow()
+                update_end = datetime.utcnow()
 
-            for hist in historial:
-                hist['ColeccionLog'] = config_to_update['ColeccionLogs']
-                hist['Proyecto'] = config_to_update['Proyecto']
-                hist['Proceso'] = config_to_update['Proceso']
+                for hist in historial:
+                    hist['ColeccionLog'] = collection
+                    hist['Proyecto'] = project
+                    hist['Proceso'] = process
 
-                hist_collection.update_one(
-                    filter={'$and': [
-                        {'ColeccionLog': hist['ColeccionLog']},
-                        {'Proyecto': hist['Proyecto']},
-                        {'Proceso': hist['Proceso']},
-                        {'Nombre': hist['Nombre']},
-                        ]},
-                    update={'$set': hist},
-                    upsert=True
-                )
+                    hist_collection.update_one(
+                        filter={'$and': [
+                            {'ColeccionLog': hist['ColeccionLog']},
+                            {'Proyecto': hist['Proyecto']},
+                            {'Proceso': hist['Proceso']},
+                            {'Nombre': hist['Nombre']},
+                            ]},
+                        update={'$set': hist},
+                        upsert=True
+                    )
 
-            for alarm in alarms:
-                alarm['Periodo'] = periodo
-                alarms_collection.insert_one(alarm)
+                for alarm in alarms:
+                    alarm['Periodo'] = periodo
+                    alarms_collection.insert_one(alarm)
 
         else:
             update_end = datetime.utcnow()
