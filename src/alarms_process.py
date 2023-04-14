@@ -30,14 +30,14 @@ def find_alerts(df, hist_data, config, difReg=None):
     estados = set(df['Estado'].unique().tolist() + df['Estado Destino'].unique().tolist()) # Estados
     comb_estado = df['Combinacion estado'].unique() # Combinación de estados
 
-    temp_Est = [df.groupby(by=["Radicado","Estado"])["Estado"].count().reset_index(0).rename(columns={'Estado':'Procesos estado'}), # procesos por estados 
-                df.groupby(by=['Radicado', 'Estado'])['tiempo_estado'].sum().reset_index(0).rename(columns={'tiempo_estado':'Dias estado'}).round(4)] # días por estado
+    temp_Est = [df.groupby(by=["Radicado","Estado"])["Estado"].count().reset_index(0).rename(columns={'Estado':'Reprocesos estado'}), # procesos por estados 
+                df.groupby(by=['Radicado', 'Estado'])['tiempo_estado'].sum().reset_index(0).rename(columns={'tiempo_estado':'Días estado'}).round(4)] # días por estado
 
-    temp_Comb = df.groupby(by=["Radicado","Combinacion estado"])["Combinacion estado"].count().reset_index(0).rename(columns={'Combinacion estado':'Procesos combinacion estado'}) # procesos por combinación 
+    temp_Comb = df.groupby(by=["Radicado","Combinacion estado"])["Combinacion estado"].count().reset_index(0).rename(columns={'Combinacion estado':'Procesos combinación estado'}) # procesos por combinación 
 
-    temp_Rad = [temp_Est[0].groupby(by=["Radicado"]).sum().reset_index(0).rename(columns={'Procesos estado':'Veces radicado'}), # procesos por radicado (sumatoria de los procesos que contiene cada estado)
-                temp_Est[0].groupby(by=["Radicado"]).count().reset_index(0).rename(columns={'Procesos estado':'Estados radicado'}),  # cantidad estados por radicado
-                df.groupby(by=['Radicado'])['tiempo_estado'].sum().reset_index(0).rename(columns={'tiempo_estado':'Dias radicado'}).round(4)] # días por radicado
+    temp_Rad = [temp_Est[0].groupby(by=["Radicado"]).sum().reset_index(0).rename(columns={'Reprocesos estado':'Veces radicado'}), # procesos por radicado (sumatoria de los procesos que contiene cada estado)
+                temp_Est[0].groupby(by=["Radicado"]).count().reset_index(0).rename(columns={'Reprocesos estado':'Estados radicado'}),  # cantidad estados por radicado
+                df.groupby(by=['Radicado'])['tiempo_estado'].sum().reset_index(0).rename(columns={'tiempo_estado':'Días radicado'}).round(4)] # días por radicado
 
     # Serivicios 
     df_serv1 = df[['Estado', 'Servicio']].drop_duplicates().rename(columns={'Estado': 'estado'})
@@ -56,7 +56,7 @@ def find_alerts(df, hist_data, config, difReg=None):
     proc = config['Proceso']
 
     # ANÁLISIS POR ESTADO 
-    variables = ['Procesos estado', 'Dias estado']
+    variables = ['Reprocesos estado', 'Días estado']
     # type_alert = ['Reprocesos por estado','Dias laborados por estado']
     rads_in = df.groupby(by=["Estado Destino"])["Radicado"].count()
     rads_out = df.groupby(by=["Estado"])["Radicado"].count()
@@ -147,12 +147,12 @@ def find_alerts(df, hist_data, config, difReg=None):
                 result['UmbralHistorial'] = float(round(thHist,6)) 
                 result['UmbralPeriodo'] = float(round(thPer,6)) 
                 result['TotalRadicadosPeriodo'] = int(total_rad_periodo)
-                result['TotalRadicados'] = int(len(radicados.unique()))             
-                result['RadicadosSobreUmbral'] = int(cant_outliers) #####
-                result['PorcentajeRadicadosSobreUmbral'] = float(round(cant_outliers/len(radicados.unique())*100,2))
-                result['PeorRadicado'] = peorRadicado
+                result['TotalRadicadosEstado'] = int(len(radicados.unique()))             
+                result['RadicadosSobreUmbralHistorico'] = int(cant_outliers) #####
+                result['PorcentajeRadicadosSobreUmbralHistorico'] = float(round(cant_outliers/len(radicados.unique())*100,2))
+                result['RadicadoPeorMetrica'] = peorRadicado
                 result['ValorMetricaPeorRadicado'] = float(round(valMax,2))
-                result['DiferenciaRadicadosInOut'] = int(dif)
+                result['VecesSalidas_vs_Ingresos'] = int(dif)
                 results.append(result)
 
             hist['Variables'] = var        
@@ -160,7 +160,7 @@ def find_alerts(df, hist_data, config, difReg=None):
 
     
     # ANÁLISIS POR COMBINACIÓN DE ESTADOS
-    variables = ['Procesos combinacion estado']
+    variables = ['Procesos combinación estado']
     # type_alert = ['Reprocesos por combinacion de estados']
     for idx, cst in enumerate(comb_estado):
         var = []
@@ -235,16 +235,16 @@ def find_alerts(df, hist_data, config, difReg=None):
                 result['Proceso'] = proc
                 result['Nombre'] = cst
                 result['Servicio'] = service_dict[df['Estado'][idx]] + '-' +service_dict[df['Estado Destino'][idx]]
-                result['TipoAnalisis'] = 'Combinacion de estados'
+                result['TipoAnalisis'] = 'Combinación de estados'
                 result['Metrica'] = v
                 result['FechaCreacion'] = datetime.utcnow()
                 result['UmbralHistorial'] = float(round(thHist,6))
                 result['UmbralPeriodo'] = float(round(thPer,6))  
                 result['TotalRadicadosPeriodo'] = int(total_rad_periodo)
-                result['TotalRadicados'] = int(len(radicados.unique()))             
-                result['RadicadosSobreUmbral'] = int(cant_outliers)  
-                result['PorcentajeRadicadosSobreUmbral'] = float(round(cant_outliers/len(radicados.unique())*100,2))
-                result['PeorRadicado'] = peorRadicado
+                result['TotalRadicadosEstado'] = int(len(radicados.unique()))             
+                result['RadicadosSobreUmbralHistorico'] = int(cant_outliers)  
+                result['PorcentajeRadicadosSobreUmbralHistorico'] = float(round(cant_outliers/len(radicados.unique())*100,2))
+                result['RadicadoPeorMetrica'] = peorRadicado
                 result['ValorMetricaPeorRadicado'] = float(round(valMax,2))
                 results.append(result)
 
@@ -255,7 +255,7 @@ def find_alerts(df, hist_data, config, difReg=None):
     var = []
     hist = {}
     hist['Nombre'] = 'No aplica'
-    variables = ['Veces radicado','Estados radicado','Dias radicado']
+    variables = ['Veces radicado','Estados radicado','Días radicado']
     # type_alert = ['Veces radicado','Estados radicado','Dias laborados por radicado']
     for i, v in enumerate(variables):
         result = {}
@@ -323,10 +323,10 @@ def find_alerts(df, hist_data, config, difReg=None):
         result['UmbralHistorial'] = float(round(thHist,6)) 
         result['UmbralPeriodo'] = float(round(thPer,6))
         result['TotalRadicadosPeriodo'] = int(total_rad_periodo)
-        result['TotalRadicados'] = int(total_rad_periodo)             
-        result['RadicadosSobreUmbral'] = int(cant_outliers)
-        result['PorcentajeRadicadosSobreUmbral'] = float(round(cant_outliers/total_rad_periodo*100,2))
-        result['PeorRadicado'] = peorRadicado
+        result['TotalRadicadosEstado'] = int(total_rad_periodo)             
+        result['RadicadosSobreUmbralHistorico'] = int(cant_outliers)
+        result['PorcentajeRadicadosSobreUmbralHistorico'] = float(round(cant_outliers/total_rad_periodo*100,2))
+        result['RadicadoPeorMetrica'] = peorRadicado
         result['ValorMetricaPeorRadicado'] = float(round(valMax,2))
         results.append(result)      
         

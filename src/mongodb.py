@@ -49,8 +49,8 @@ def fetch_data(
         listPer = list(set(listPer))
         query['Periodo'] = {"$in":listPer} # todos los cambios de estado para los radicados de los periodos "listPer".
     else: 
-        listPer = [period]
-        query['Periodo'] = period # en caso de análsis manaul por periodo. 
+        listPer = period
+        query['Periodo'] = {"$in":listPer} # en caso de análsis manual por periodo. 
         
     projection = {
         '_id': 0,
@@ -96,7 +96,7 @@ def fetch_data(
             projection=projection
         )
 
-    cursor.limit(1_500_000)
+    cursor.limit(4_500_000)
 
     for document in cursor:
         documents.append(document)
@@ -132,7 +132,7 @@ def fetch_data_hist(
         projection=projection
     )
 
-    cursor.limit(1_500_000)
+    cursor.limit(2_500_000)
 
     for document in cursor:
         documents.append(document)
