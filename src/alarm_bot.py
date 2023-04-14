@@ -72,7 +72,7 @@ def auto_alarms():
             # en caso de analizar manualmente por periodo (escribir el periodo deseado)
             period=["202201","202202","202203","202204","202205","202206","202207","202208","202209",
                     "202210","202211","202212","202301","202302","202303"], 
-            # nowDate=nowDate,
+            nowDate=nowDate,
             )
         hist_data = fetch_data_hist(
             collection=hist_collection,
