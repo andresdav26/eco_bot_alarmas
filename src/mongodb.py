@@ -1,12 +1,14 @@
 from pymongo import MongoClient
-
+from datetime import datetime, timedelta
+import pandas as pd
 
 def fetch_data(
     collection: str,
-    period: str,
+    project: str,
+    process: str,
     conn: str,
-    project: str | None = None,
-    process: str | list | None = None,
+    period: str,
+    nowDate: datetime | None = None,
     extra_fields: dict | None = None
     ) -> list:
     """
@@ -14,14 +16,16 @@ def fetch_data(
 
     Args:
         collection (str): collection name.
-        period (str | None, optional): time period (year-month) in yyyymm format. Defaults to None.
-        project (str | None, optional): project name. Defaults to None.
-        process (str | None, optional): process name. Defaults to None.
-        date_range (list | None, optional): date range [initial_date, end_date]. Defaults to None.
+        project (str): project name. 
+        process (str): process name. 
+        period (str): time period (year-month) in yyyymm format. Manual analysis.
+        nowDate (datetime | None, optional): Current date. Defaults to None.
+        extra_fields (dict | None, optional): Metadata. Defaults to None.
 
     Returns:
         list: requested data.
     """
+
 
     client = MongoClient(conn)
     database = client.ebk_logs
@@ -29,17 +33,30 @@ def fetch_data(
     documents = []
 
     query = {}
-    if period is not None: query['Periodo'] = period
-    if project is not None: query['Proyecto'] = project
+    query['Proyecto'] = project
+    query['Proceso'] = process
 
-    if bool(process):
-        if not isinstance(process, list):
-            query['Proceso'] = {'$in': [process]}
-        else:
-            query['Proceso'] = {'$in': process}
+    if nowDate is not None:
+        initDate = (nowDate - timedelta(days=30)).replace(hour=0,minute=0,second=0,microsecond=0) # 30 días desde la fecha actual. 
+        cursortemp = database[collection].find(
+                    {'Fecha Inicio / Hora':{'$lt': nowDate, '$gte': initDate}},  # fecha final, fecha inicial
+                    projection = {'_id': 0, 'Periodo': 1}
+                    )
+        listPer = []
+        for document in cursortemp:
+            listPer.append(document['Periodo'])
 
+        listPer = list(set(listPer))
+        query['Periodo'] = {"$in":listPer} # todos los cambios de estado para los radicados de los periodos "listPer".
+    else: 
+        listPer = period
+        query['Periodo'] = {"$in":listPer} # en caso de análsis manual por periodo. 
+        
     projection = {
         '_id': 0,
+        'Periodo':1,
+        'Proyecto':1,
+        'Proceso':1,
         'Radicado': 1,
         'Servicio': 1,
         'Estado': 1,
@@ -79,7 +96,43 @@ def fetch_data(
             projection=projection
         )
 
-    cursor.limit(1_500_000)
+    cursor.limit(4_500_000)
+
+    for document in cursor:
+        documents.append(document)
+
+    return documents, listPer
+
+
+def fetch_data_hist(
+    collection: str,
+    ) -> list:
+    """
+    Query log data from the database.
+
+    Args:
+        collection (str): collection name.
+
+    Returns:
+        list: requested data.
+    """
+
+    documents = []
+
+    projection = {
+        '_id': 0,
+        'ColeccionLog':1,
+        'Proyecto':1,
+        'Proceso':1,
+        'Nombre': 1,
+        'Variables': 1,
+        }
+
+    cursor = collection.find(
+        projection=projection
+    )
+
+    cursor.limit(2_500_000)
 
     for document in cursor:
         documents.append(document)
