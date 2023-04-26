@@ -4,7 +4,7 @@ from datetime import datetime
 import logging
 import sys
 from pymongo import MongoClient
-from mongodb import fetch_data, fetch_data_hist
+from alarms.mongodb import fetch_data, fetch_data_hist
 from alarms_process import find_alerts
 import pandas as pd
 

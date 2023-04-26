@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import collections
 
-from utils import calculate_times
+from alarms.utils import calculate_times
 
 
 def find_outliers_IQR(val):
