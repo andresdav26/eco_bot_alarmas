@@ -1,7 +1,9 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 import numpy as np
 from pathlib import Path
 import pandas as pd
+import collections
+
 
 HOLIDAYS = []
 with open(Path(__file__).parent / 'holidays.txt', 'r') as f:
@@ -67,3 +69,13 @@ def time_string(days: float):
     seconds = (minutes % 1) * 60
 
     return f'{int(days)}d {int(hours)}h {int(minutes)}m {int(seconds)}s'
+
+
+def find_outliers_IQR(val):
+    q75, q25  = np.percentile(val, [75, 25])
+    IQR = q75 - q25
+    th = q75 + 1.5*IQR
+    
+    return th
+
+

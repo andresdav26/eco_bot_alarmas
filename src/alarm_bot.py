@@ -4,8 +4,8 @@ from datetime import datetime
 import logging
 import sys
 from pymongo import MongoClient
-from alarms.mongodb import fetch_data, fetch_data_hist
-from alarms_process import find_alerts
+from mongodb import fetch_data, fetch_data_hist
+from alarms_main import find_alerts
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -70,9 +70,8 @@ def auto_alarms():
             process=process,
             conn=MONGODB_CONN_LOGS,
             # en caso de analizar manualmente por periodo (escribir el periodo deseado)
-            period=["202201","202202","202203","202204","202205","202206","202207","202208","202209",
-                    "202210","202211","202212","202301","202302","202303"], 
-            nowDate=nowDate,
+            period=["202304"], 
+            # nowDate=nowDate,
             )
         hist_data = fetch_data_hist(
             collection=hist_collection,
@@ -95,16 +94,16 @@ def auto_alarms():
 
                         difReg = len(df_logs_data.loc[periodo]) - OldNumReg # Difference between old and new registers number by a period 
                         if difReg > 0:
-                            # updating periods - registers 
-                            config_collection.update_one(
-                                filter={'_id': config_to_update['_id']},
-                                update={"$set": {"CantRegistros." + str(idx): OldNumReg+difReg}},
-                                )
                             logger.info(f'Existen {difReg} registros nuevos.')
                             # Alarms
                             t0 = time.time()
                             alarms, historial = find_alerts(df_logs_data.loc[periodo], hist_data, config_to_update, difReg)
                             logger.info(f'Tiempo: {round(time.time()-t0,2)} seg.')
+                            # updating periods - registers 
+                            config_collection.update_one(
+                                filter={'_id': config_to_update['_id']},
+                                update={"$set": {"CantRegistros." + str(idx): OldNumReg+difReg}},
+                                )
                         else:
                             logger.info(f'No existen registros nuevos.')
                             config_collection.update_one(
@@ -113,15 +112,15 @@ def auto_alarms():
                                 )
                             continue
                     else:
+                        # Alarms
+                        t0 = time.time()
+                        alarms, historial = find_alerts(df_logs_data.loc[periodo], hist_data, config_to_update)
+                        logger.info(f'Tiempo: {round(time.time()-t0,2)} seg.')
                         # updating periods - registers 
                         config_collection.update_one(
                             filter={'_id': config_to_update['_id']},
                             update={"$addToSet": {'PeriodosConsultados': periodo, "CantRegistros": len(df_logs_data.loc[periodo])}},
                         )
-                        # Alarms
-                        t0 = time.time()
-                        alarms, historial = find_alerts(df_logs_data.loc[periodo], hist_data, config_to_update)
-                        logger.info(f'Tiempo: {round(time.time()-t0,2)} seg.')
 
                     update_end = datetime.utcnow()
 
