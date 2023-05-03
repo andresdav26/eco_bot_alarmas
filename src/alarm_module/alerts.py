@@ -3,7 +3,7 @@ import pandas as pd
 import collections
 from datetime import datetime
 
-from alarms.utils import find_outliers_IQR
+from alarm_module.utils import find_outliers_IQR
 
 class Alerts:
     def __init__(self, data, histData, typeAnalysis, variables, temp, difReg, config, totalRadPeriodo):

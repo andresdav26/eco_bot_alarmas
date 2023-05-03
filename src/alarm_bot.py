@@ -4,8 +4,8 @@ from datetime import datetime
 import logging
 import sys
 from pymongo import MongoClient
-from mongodb import fetch_data, fetch_data_hist
-from alarms_main import find_alerts
+from alarm_module.mongodb import fetch_data, fetch_data_hist
+from alarm_main import find_alerts
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ def auto_alarms():
             conn=MONGODB_CONN_LOGS,
             # en caso de analizar manualmente por periodo (escribir el periodo deseado)
             period=["202304"], 
-            # nowDate=nowDate,
+            nowDate=nowDate,
             )
         hist_data = fetch_data_hist(
             collection=hist_collection,

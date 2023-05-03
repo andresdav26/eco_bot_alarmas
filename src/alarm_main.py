@@ -1,16 +1,11 @@
-from alarms.preprocess import DataFramepreprocess
-from alarms.metric import Metric
-from alarms.alerts import Alerts
+from alarm_module.alerts import Alerts
+from alarm_module.utils import preprocess
 
-def find_alerts(df, hist_data, config, difReg=None):
+def find_alerts(logs_df, hist_data, config, difReg=None):
     
-    df, service_dict = DataFramepreprocess(df).preprocess()
-
-    temp_Est = Metric(df).metricEstado()
-    temp_Comb = Metric(df).metricCombEstado()
-    temp_Rad = Metric(df).metricRadicado()
-
-    # variables 
+    # Pre-procesamiento de los datos de logs
+    df, service_dict, temp_Est, temp_Comb, temp_Rad = preprocess(logs_df)
+ 
     totalRadPeriodo = len(df['Radicado'].unique()) # Total Radicados en el periodo
     estados = set(df['Estado'].unique().tolist() + df['Estado Destino'].unique().tolist()) # Estados
     comb_estado = df['Combinacion estado'].unique() # Combinación de estados

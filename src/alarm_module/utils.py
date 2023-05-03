@@ -1,9 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import numpy as np
 from pathlib import Path
 import pandas as pd
-import collections
-
 
 HOLIDAYS = []
 with open(Path(__file__).parent / 'holidays.txt', 'r') as f:
@@ -62,20 +60,38 @@ def calculate_times(df: pd.DataFrame):
 
     return df['tiempo_estado']
 
-
-def time_string(days: float):
-    hours = (days % 1) * 24
-    minutes = (hours % 1) * 60
-    seconds = (minutes % 1) * 60
-
-    return f'{int(days)}d {int(hours)}h {int(minutes)}m {int(seconds)}s'
-
-
 def find_outliers_IQR(val):
     q75, q25  = np.percentile(val, [75, 25])
     IQR = q75 - q25
     th = q75 + 1.5*IQR
     
     return th
+
+def preprocess(logsDataframe):
+        df = logsDataframe.reset_index(drop=True)
+        df['Radicado'] = df['Radicado'].astype(str)
+        df['Combinacion estado'] = df['Estado']+'-'+df['Estado Destino'] 
+
+        df['Fecha Inicio / Hora'] = df['Fecha Inicio / Hora'] - timedelta(hours=5)
+        df['Fecha Fin / Hora'] = df['Fecha Fin / Hora'] - timedelta(hours=5)
+        
+        # Días laborados por registro
+        df['tiempo_estado'] = calculate_times(df)
+
+        tempEst = [df.groupby(by=["Radicado","Estado"])["Estado"].count().reset_index(0).rename(columns={'Estado':'Reprocesos estado'}), # procesos por estados 
+                   df.groupby(by=['Radicado', 'Estado'])['tiempo_estado'].sum().reset_index(0).rename(columns={'tiempo_estado':'Días estado'}).round(4)] # días por estado
+
+        tempComb = [df.groupby(by=["Radicado","Combinacion estado"])["Combinacion estado"].count().reset_index(0).rename(columns={'Combinacion estado':'Procesos combinación estado'})] # procesos por combinación 
+
+        tempRad = [tempEst[0].groupby(by=["Radicado"]).sum().reset_index(0).rename(columns={'Reprocesos estado':'Veces radicado'}), # procesos por radicado (sumatoria de los procesos que contiene cada estado)
+                    tempEst[0].groupby(by=["Radicado"]).count().reset_index(0).rename(columns={'Reprocesos estado':'Estados radicado'}),  # cantidad estados por radicado
+                    df.groupby(by=['Radicado'])['tiempo_estado'].sum().reset_index(0).rename(columns={'tiempo_estado':'Días radicado'}).round(4)] # días por radicado
+        # servicios
+        df_serv1 = df[['Estado', 'Servicio']].drop_duplicates().rename(columns={'Estado': 'estado'})
+        df_serv2 = df[['Estado Destino', 'Servicio']].drop_duplicates().rename(columns={'Estado Destino': 'estado'})
+        df_serv = pd.concat([df_serv1, df_serv2], ignore_index=True).drop_duplicates(subset='estado')
+        service_dict = {row['estado']: row['Servicio'] for _, row in df_serv.iterrows()}
+
+        return df, service_dict, tempEst, tempComb, tempRad
 
 
