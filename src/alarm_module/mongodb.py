@@ -1,6 +1,5 @@
 from pymongo import MongoClient
 from datetime import datetime, timedelta
-import pandas as pd
 
 def fetch_data(
     collection: str,
