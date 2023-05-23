@@ -1,0 +1,23 @@
+{
+    "@type": "MessageCard",
+    "@context": "http://schema.org/extensions",
+    "themeColor": "0076D7",
+    "summary": "alertas",
+    "sections": [{
+        "activityTitle": "",
+        "facts": [{
+            "name": "Proyecto:",
+            "value": "XXXXX"
+        }, {
+            "name": "Proceso:",
+            "value": "XXXXX"
+        }, {
+            "name": "Nombre:",
+            "value": "XXXXXX"
+        }, {
+            "name": "Periodo:",
+            "value": "XXXXXX"
+        }],
+        "markdown": true
+    }]
+}
