@@ -159,8 +159,9 @@ def auto_alarms():
                         for alarm in alarms:
                             alarm['Periodo'] = periodo
                             alarms_collection.insert_one(alarm)
-                            connect.editpayload(alarm["Metrica"], alarm["Proyecto"], alarm["Proceso"], alarm["Nombre"], alarm['Periodo'])
-                            connect.post_message()
+                            if alarm['RadicadosSobreUmbralHistorico'] > 0 and alarm['TotalRadicadosEstado']/alarm['TotalRadicadosPeriodo'] > 0.5: 
+                                connect.editpayload(alarm["Metrica"], alarm["Proyecto"], alarm["Proceso"], alarm["Nombre"], alarm['Periodo'])
+                                connect.post_message()
 
                     else:
                         update_end = datetime.utcnow()
