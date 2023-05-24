@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 FROM ubuntu:22.04 AS runner-image
 
 ARG VENV_PATH=/home/ecosyc/venv
-ARG WORK_DIR=/home/ecosyc/eco_rutas_procesos
+ARG WORK_DIR=/home/ecosyc/eco_bot_alarmas
 
 RUN apt update && apt install --no-install-recommends -y python3.10 python3.10-venv tzdata && \
     apt clean && rm -rf /var/lib/apt/lists/*
