@@ -19,20 +19,17 @@ cons_handler.setFormatter(logging.Formatter('%(name)s [%(asctime)s] %(levelname)
 logger.addHandler(cons_handler)
 logger.propagate = False
 
-# URL TEAMS
-URL_WEBHOOK = os.environ["WEBHOOK"]
-# load card .json
-card_path = str(Path(__file__).parent/ 'alarm_module/cardtemplate.json')
-with open(card_path, "rb") as in_file:
-    datacard = json.load(in_file)
-connect = ConnectorCard(datacard, URL_WEBHOOK)
 
 if 'MONGO_EBKIA_DES' in os.environ:
     MONGODB_CONN_IA = os.environ['MONGO_EBKIA_DES']
     IA_DATABASE = 'ebk_IA_des'
+    # URL TEAMS
+    URL_WEBHOOK = os.environ["WEBHOOK_DES"]
 else:
     MONGODB_CONN_IA = os.environ['MONGO_EBKIA_PRU']
     IA_DATABASE = 'ebk_IA_pru'
+    # URL TEAMS
+    URL_WEBHOOK = os.environ["WEBHOOK_PRU"]
 
 MONGODB_CONN_LOGS = os.environ['MONGO_LOGS_PRD']
 
@@ -43,6 +40,13 @@ def auto_alarms():
     config_collection = db['ConfigAutoalarmas']
     alarms_collection = db['Autoalarmas']
     hist_collection = db['HistAutoalarmas']
+
+    # load card .json
+    card_path = str(Path(__file__).parent/ 'alarm_module/cardtemplate.json')
+    with open(card_path, "rb") as in_file:
+        datacard = json.load(in_file)
+    connect = ConnectorCard(datacard, URL_WEBHOOK)
+
 
     # get active alarm configurations that are not being updated
     configs = [conf for conf in config_collection.find({'Activa': True, 'Actualizando': False})]
